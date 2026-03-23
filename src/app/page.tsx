@@ -297,26 +297,18 @@ function ChatScreen({ profile, onReset }: { profile: UserProfile; onReset: () =>
     return () => { speechSynthesis.onvoiceschanged = null; };
   }, []);
 
-  // AudioContext unlock — genaktiverer iOS audio session efter STT
-  const unlockAudio = useCallback(async () => {
-    try {
-      const AC = window.AudioContext || (window as unknown as Record<string, typeof AudioContext>).webkitAudioContext;
-      const ctx = new AC();
-      await ctx.resume();
-      const osc = ctx.createOscillator();
-      osc.frequency.value = 0;
-      osc.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + 0.01);
-      await new Promise(r => setTimeout(r, 100));
-      ctx.close();
-    } catch { /* ignore on desktop */ }
+  // Re-unlock TTS efter STT — silent utterance (testet: virker på Safari mobil)
+  const unlockTTS = useCallback(() => {
+    const silent = new SpeechSynthesisUtterance("");
+    silent.volume = 0;
+    speechSynthesis.speak(silent);
+    return new Promise<void>(r => setTimeout(r, 200));
   }, []);
 
   // TTS der kalder onDone når færdig (bruges til auto-loop)
   const speakText = useCallback((text: string, onDone: () => void) => {
-    // Re-unlock audio session (Safari mister den efter STT)
-    unlockAudio().then(() => {
+    // Re-unlock TTS session (Safari mister den efter STT)
+    unlockTTS().then(() => {
       const u = new SpeechSynthesisUtterance(text);
       u.lang = "da-DK";
       u.rate = 0.82;
@@ -344,7 +336,7 @@ function ChatScreen({ profile, onReset }: { profile: UserProfile; onReset: () =>
 
       speechSynthesis.speak(u);
     });
-  }, [getDanishVoice, voicesLoaded, unlockAudio]);
+  }, [getDanishVoice, voicesLoaded, unlockTTS]);
 
   // Start lytning — returnerer promise med transkriberet tekst (eller "" ved timeout)
   const listenOnce = useCallback((): Promise<string> => {
