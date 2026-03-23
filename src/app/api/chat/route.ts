@@ -1,30 +1,44 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { askClaude, Message } from '@/lib/claude';
-import { getSession, addMessage } from '@/lib/memory';
+import {
+  getProfile,
+  getOrCreateConversation,
+  addMessageToConversation,
+  buildUserContext,
+} from '@/lib/memory';
 
 export async function POST(req: NextRequest) {
   try {
-    const { message, sessionId, userContext } = await req.json();
+    const { message, profileId } = await req.json();
 
-    if (!message || !sessionId) {
-      return NextResponse.json({ error: 'Missing message or sessionId' }, { status: 400 });
+    if (!message || !profileId) {
+      return NextResponse.json({ error: 'Missing message or profileId' }, { status: 400 });
     }
 
-    const session = getSession(sessionId, userContext);
+    // Hent profil fra Supabase
+    const profile = await getProfile(profileId);
+    if (!profile) {
+      return NextResponse.json({ error: 'Profile not found' }, { status: 404 });
+    }
 
-    // Add user message to history
-    addMessage(sessionId, { role: 'user', content: message });
+    // Hent eller opret samtale
+    const conversation = await getOrCreateConversation(profileId);
 
-    // Build messages array for Claude (last 20 turns to keep context manageable)
-    const messages: Message[] = session.messages.slice(-20);
+    // Tilføj brugerens besked
+    await addMessageToConversation(conversation.id, { role: 'user', content: message });
 
-    // Call Claude CLI
-    const reply = askClaude(messages, session.context);
+    // Byg kontekst og besked-historik (sidste 20 beskeder)
+    const userContext = buildUserContext(profile);
+    const allMessages = [...(conversation.messages as Message[]), { role: 'user' as const, content: message }];
+    const recentMessages = allMessages.slice(-20);
 
-    // Add assistant reply to history
-    addMessage(sessionId, { role: 'assistant', content: reply });
+    // Kald Claude CLI
+    const reply = askClaude(recentMessages, userContext);
 
-    return NextResponse.json({ reply, sessionId });
+    // Gem assistentens svar
+    await addMessageToConversation(conversation.id, { role: 'assistant', content: reply });
+
+    return NextResponse.json({ reply, profileId, conversationId: conversation.id });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     console.error('Chat error:', message);

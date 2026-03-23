@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 
 type AppState = "idle" | "listening" | "thinking" | "speaking";
-type Screen = "setup" | "chat";
+type Screen = "select" | "setup" | "chat";
 
 const STATE_CONFIG = {
   idle: { bg: "bg-[#4A9B8F]", ring: "ring-[#4A9B8F]/30", label: "Tryk for at tale", hint: "Klar når du er det" },
@@ -15,11 +15,106 @@ const STATE_CONFIG = {
 const BG = "linear-gradient(160deg, #FDF6EC 0%, #F0EBE3 100%)";
 
 interface UserProfile {
+  id?: string;
   name: string;
   age: string;
   family: string;
   interests: string;
   stories: string;
+}
+
+interface SavedProfile {
+  id: string;
+  name: string;
+  age: number | null;
+  family: string;
+  interests: string;
+  stories: string;
+  updated_at: string;
+}
+
+// ─── Profile Selection Screen ────────────────────────────────────────────────
+
+function SelectScreen({
+  onSelect,
+  onCreateNew,
+}: {
+  onSelect: (profile: SavedProfile) => void;
+  onCreateNew: () => void;
+}) {
+  const [profiles, setProfiles] = useState<SavedProfile[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/profiles")
+      .then((r) => r.ok ? r.json() : [])
+      .then((data) => setProfiles(data))
+      .catch(() => setProfiles([]))
+      .finally(() => setLoading(false));
+  }, []);
+
+  return (
+    <div className="flex flex-col items-center min-h-screen px-6 py-12" style={{ background: BG }}>
+      <div className="w-full max-w-lg">
+        <div className="text-center mb-10">
+          <h1 className="text-4xl font-semibold text-[#3D3530] tracking-tight mb-2">MindMate</h1>
+          <p className="text-[#9C8A7A] text-base">Hvem skal vi tale med i dag?</p>
+        </div>
+
+        {loading ? (
+          <p className="text-center text-[#9C8A7A] py-8">Indlæser…</p>
+        ) : (
+          <>
+            {profiles.length > 0 && (
+              <div className="space-y-3 mb-8">
+                {profiles.map((p) => (
+                  <button
+                    key={p.id}
+                    onClick={() => onSelect(p)}
+                    className="w-full text-left rounded-2xl p-5 border border-[#DDD0C0]/60
+                      transition-all duration-200 hover:shadow-md active:scale-[0.99]"
+                    style={{ background: "rgba(255,255,255,0.7)" }}
+                  >
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <h3 className="text-lg font-semibold text-[#3D3530]">
+                          {p.name}
+                          {p.age && (
+                            <span className="text-sm font-normal text-[#9C8A7A] ml-2">
+                              {p.age} år
+                            </span>
+                          )}
+                        </h3>
+                        {p.family && (
+                          <p className="text-sm text-[#9C8A7A] mt-0.5 truncate">{p.family}</p>
+                        )}
+                      </div>
+                      <span className="text-2xl text-[#4A9B8F]">→</span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <button
+              onClick={onCreateNew}
+              className="w-full py-5 rounded-2xl text-white text-xl font-medium shadow-lg
+                transition-all duration-300 active:scale-[0.98]"
+              style={{ background: "#4A9B8F" }}
+            >
+              {profiles.length > 0 ? "Opret ny profil" : "Kom i gang"}
+            </button>
+
+            {profiles.length === 0 && (
+              <p className="text-center text-[#B0A090] text-sm mt-4">
+                Opret en profil for at starte din første samtale
+              </p>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ─── Setup Screen ────────────────────────────────────────────────────────────
@@ -32,11 +127,34 @@ function SetupScreen({ onStart }: { onStart: (profile: UserProfile) => void }) {
     interests: "",
     stories: "",
   });
+  const [saving, setSaving] = useState(false);
 
   const set = (k: keyof UserProfile) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setProfile((p) => ({ ...p, [k]: e.target.value }));
 
-  const canStart = profile.name.trim().length > 0;
+  const canStart = profile.name.trim().length > 0 && !saving;
+
+  const handleStart = async () => {
+    if (!canStart) return;
+    setSaving(true);
+    try {
+      // Gem profil i Supabase
+      const res = await fetch("/api/profiles", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(profile),
+      });
+      if (res.ok) {
+        const saved = await res.json();
+        onStart({ ...profile, id: saved.id });
+      } else {
+        onStart(profile); // Fallback: start uden gemt profil
+      }
+    } catch {
+      onStart(profile); // Fallback ved netværksfejl
+    }
+    setSaving(false);
+  };
 
   return (
     <div className="flex flex-col items-center min-h-screen px-6 py-12" style={{ background: BG }}>
@@ -44,7 +162,7 @@ function SetupScreen({ onStart }: { onStart: (profile: UserProfile) => void }) {
         {/* Header */}
         <div className="text-center mb-10">
           <h1 className="text-4xl font-semibold text-[#3D3530] tracking-tight mb-2">MindMate</h1>
-          <p className="text-[#9C8A7A] text-base">Hvem skal vi tale med i dag?</p>
+          <p className="text-[#9C8A7A] text-base">Fortæl os lidt om den vi skal tale med</p>
         </div>
 
         {/* Form */}
@@ -76,14 +194,14 @@ function SetupScreen({ onStart }: { onStart: (profile: UserProfile) => void }) {
 
         {/* Start button */}
         <button
-          onClick={() => canStart && onStart(profile)}
+          onClick={handleStart}
           disabled={!canStart}
           className="mt-10 w-full py-5 rounded-2xl text-white text-xl font-medium shadow-lg
             transition-all duration-300 active:scale-[0.98]
             disabled:opacity-40 disabled:cursor-not-allowed"
           style={{ background: canStart ? "#4A9B8F" : "#aaa" }}
         >
-          Start samtale med {profile.name || "…"}
+          {saving ? "Opretter…" : `Start samtale med ${profile.name || "…"}`}
         </button>
 
         <p className="text-center text-[#B0A090] text-sm mt-4">
@@ -138,7 +256,6 @@ function Field({
 function ChatScreen({ profile, onReset }: { profile: UserProfile; onReset: () => void }) {
   const [state, setState] = useState<AppState>("idle");
   const [lastReply, setLastReply] = useState("");
-  const [sessionId] = useState(() => crypto.randomUUID());
   const [dots, setDots] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -154,15 +271,6 @@ function ChatScreen({ profile, onReset }: { profile: UserProfile; onReset: () =>
     }
     return () => clearInterval(t);
   }, [state]);
-
-  // Build user context string for Claude
-  const userContext = [
-    `Brugerens navn er ${profile.name}.`,
-    profile.age && `${profile.name} er ${profile.age} år gammel.`,
-    profile.family && `Familie: ${profile.family}`,
-    profile.interests && `Interesser: ${profile.interests}`,
-    profile.stories && `Historier og minder: ${profile.stories}`,
-  ].filter(Boolean).join("\n");
 
   const speakWithBrowserTTS = useCallback((text: string) => {
     const u = new SpeechSynthesisUtterance(text);
@@ -194,12 +302,12 @@ function ChatScreen({ profile, onReset }: { profile: UserProfile; onReset: () =>
     try {
       const res = await fetch("/api/chat", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, sessionId, userContext }),
+        body: JSON.stringify({ message: text, profileId: profile.id }),
       });
       if (!res.ok) { setLastReply("Undskyld, der skete en fejl. Prøv igen."); setState("idle"); return; }
       await playReply((await res.json()).reply);
     } catch { setLastReply("Undskyld, jeg kan ikke svare lige nu."); setState("idle"); }
-  }, [sessionId, userContext, playReply]);
+  }, [profile.id, playReply]);
 
   const startListening = useCallback(async () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -291,12 +399,32 @@ function ChatScreen({ profile, onReset }: { profile: UserProfile; onReset: () =>
 // ─── App root ─────────────────────────────────────────────────────────────────
 
 export default function Home() {
-  const [screen, setScreen] = useState<Screen>("setup");
+  const [screen, setScreen] = useState<Screen>("select");
   const [profile, setProfile] = useState<UserProfile | null>(null);
 
-  const handleStart = (p: UserProfile) => { setProfile(p); setScreen("chat"); };
-  const handleReset = () => { setProfile(null); setScreen("setup"); };
+  const handleSelectExisting = (p: SavedProfile) => {
+    setProfile({
+      id: p.id,
+      name: p.name,
+      age: p.age?.toString() || "",
+      family: p.family,
+      interests: p.interests,
+      stories: p.stories,
+    });
+    setScreen("chat");
+  };
+
+  const handleStart = (p: UserProfile) => {
+    setProfile(p);
+    setScreen("chat");
+  };
+
+  const handleReset = () => {
+    setProfile(null);
+    setScreen("select");
+  };
 
   if (screen === "chat" && profile) return <ChatScreen profile={profile} onReset={handleReset} />;
-  return <SetupScreen onStart={handleStart} />;
+  if (screen === "setup") return <SetupScreen onStart={handleStart} />;
+  return <SelectScreen onSelect={handleSelectExisting} onCreateNew={() => setScreen("setup")} />;
 }
