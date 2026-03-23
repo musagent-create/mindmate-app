@@ -297,46 +297,36 @@ function ChatScreen({ profile, onReset }: { profile: UserProfile; onReset: () =>
     return () => { speechSynthesis.onvoiceschanged = null; };
   }, []);
 
-  // Re-unlock TTS efter STT — silent utterance (testet: virker på Safari mobil)
-  const unlockTTS = useCallback(() => {
-    const silent = new SpeechSynthesisUtterance("");
-    silent.volume = 0;
-    speechSynthesis.speak(silent);
-    return new Promise<void>(r => setTimeout(r, 200));
-  }, []);
-
-  // TTS der kalder onDone når færdig (bruges til auto-loop)
+  // TTS — direkte speak (test 2 bekræfter det virker på Safari mobil)
   const speakText = useCallback((text: string, onDone: () => void) => {
-    // Re-unlock TTS session (Safari mister den efter STT)
-    unlockTTS().then(() => {
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = "da-DK";
-      u.rate = 0.82;
-      u.pitch = 1.05;
-      const dv = getDanishVoice();
-      if (dv) {
-        u.voice = dv;
-      } else {
-        u.rate = 0.75;
-      }
-      // Safari bug: onend fires ikke altid. Fallback med timeout.
-      let done = false;
-      const finish = () => {
-        if (done) return;
-        done = true;
-        onDone();
-      };
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = "da-DK";
+    u.rate = 0.82;
+    u.pitch = 1.05;
+    const dv = getDanishVoice();
+    if (dv) {
+      u.voice = dv;
+    } else {
+      u.rate = 0.75;
+    }
 
-      u.onend = finish;
-      u.onerror = finish;
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      onDone();
+    };
 
-      const estimatedMs = Math.max(3000, text.length * 80 + 2000);
-      const fallbackTimer = setTimeout(finish, estimatedMs);
-      u.addEventListener("end", () => clearTimeout(fallbackTimer));
+    u.onend = finish;
+    u.onerror = finish;
 
-      speechSynthesis.speak(u);
-    });
-  }, [getDanishVoice, voicesLoaded, unlockTTS]);
+    // Safari: onend fires ikke altid. Fallback timeout.
+    const estimatedMs = Math.max(3000, text.length * 80 + 2000);
+    const fallbackTimer = setTimeout(finish, estimatedMs);
+    u.addEventListener("end", () => clearTimeout(fallbackTimer));
+
+    speechSynthesis.speak(u);
+  }, [getDanishVoice, voicesLoaded]);
 
   // Start lytning — returnerer promise med transkriberet tekst (eller "" ved timeout)
   const listenOnce = useCallback((): Promise<string> => {
