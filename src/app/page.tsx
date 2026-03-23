@@ -328,8 +328,6 @@ function ChatScreen({ profile, onReset }: { profile: UserProfile; onReset: () =>
 
     u.addEventListener("end", () => clearTimeout(fallbackTimer));
 
-    // Safari kræver at speechSynthesis ikke er paused
-    speechSynthesis.cancel();
     speechSynthesis.speak(u);
   }, [getDanishVoice, voicesLoaded]);
 
@@ -415,14 +413,32 @@ function ChatScreen({ profile, onReset }: { profile: UserProfile; onReset: () =>
     try { await navigator.mediaDevices.getUserMedia({ audio: true }); }
     catch { setLastReply("Mikrofon-adgang nægtet. Tillad mikrofon og prøv igen."); return; }
 
-    // Safari: "lås op" for TTS ved at tale under user gesture
-    // Uden dette blokerer Safari speak() i auto-loop
-    const unlock = new SpeechSynthesisUtterance("");
-    unlock.volume = 0;
-    speechSynthesis.speak(unlock);
-
     setConversationActive(true);
     checkedInRef.current = false;
+
+    // Safari kræver at første speak() sker direkte i user gesture.
+    // Så vi taler en velkomst SYNKRONT under tap, og lytter DEREFTER.
+    const greeting = `Hej ${profile.name}! Hvad har du på hjerte?`;
+    setLastReply(greeting);
+    setState("speaking");
+
+    await new Promise<void>((resolve) => {
+      const u = new SpeechSynthesisUtterance(greeting);
+      u.lang = "da-DK";
+      u.rate = 0.82;
+      u.pitch = 1.05;
+      const dv = getDanishVoice();
+      if (dv) u.voice = dv;
+
+      let done = false;
+      const finish = () => { if (!done) { done = true; resolve(); } };
+      u.onend = finish;
+      u.onerror = finish;
+      const timer = setTimeout(finish, Math.max(3000, greeting.length * 80 + 2000));
+      u.addEventListener("end", () => clearTimeout(timer));
+
+      speechSynthesis.speak(u);
+    });
 
     // Loop: lyt → send → svar → gentag
     const loop = async () => {
