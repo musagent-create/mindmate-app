@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getProfile, updateProfile, deleteProfile, getConversationsByProfile, clearConversationsByProfile } from '@/lib/memory';
+import { generateRecap, Message } from '@/lib/claude';
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -8,6 +9,22 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
     if (!profile) return NextResponse.json({ error: 'Not found' }, { status: 404 });
 
     const conversations = await getConversationsByProfile(id);
+
+    // Generér recap hvis ?recap=true
+    const { searchParams } = new URL(_req.url);
+    if (searchParams.get('recap') === 'true') {
+      const recaps = conversations
+        .filter(c => (c.messages as Message[]).length > 0)
+        .slice(0, 5) // Max 5 seneste samtaler
+        .map(c => ({
+          id: c.id,
+          date: c.created_at,
+          messageCount: (c.messages as Message[]).length,
+          recap: generateRecap(c.messages as Message[], profile!.name),
+        }));
+      return NextResponse.json({ profile, recaps });
+    }
+
     return NextResponse.json({ profile, conversations });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';

@@ -42,3 +42,35 @@ export function askClaude(messages: Message[], userContext?: string): string {
 
   return (result.stdout || '').trim();
 }
+
+export function generateRecap(messages: Message[], userName: string): string {
+  const prompt = `Du er en hjælpsom assistent for pårørende til ældre med demens.
+
+Lav et kort, varmt resumé af denne samtale. Resuméet skal:
+- Nævne hvad ${userName} talte om (emner, navne, historier)
+- Beskrive stemningen (glad, rolig, forvirret, ked af det)
+- Nævne hvis noget blev gentaget (det er normalt ved demens, ikke negativt)
+- Være 3-5 sætninger, skrevet til pårørende
+- Aldrig være klinisk eller nedladende — skriv som en varm dagbogsnotits
+
+Samtale:
+${messages.map(m => `${m.role === 'user' ? userName : 'MindMate'}: ${m.content}`).join('\n')}
+
+Skriv KUN resuméet, ingen overskrift eller ekstra tekst.`;
+
+  const result = spawnSync(
+    '/Users/musagent/.local/bin/claude',
+    ['--print', '--model', 'claude-sonnet-4-6'],
+    {
+      input: prompt,
+      encoding: 'utf8',
+      timeout: 30000,
+      maxBuffer: 1024 * 1024,
+    }
+  );
+
+  if (result.error) throw new Error(`Recap error: ${result.error.message}`);
+  if (result.status !== 0) throw new Error(`Recap failed: ${result.stderr}`);
+
+  return (result.stdout || '').trim();
+}

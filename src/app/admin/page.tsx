@@ -28,7 +28,14 @@ interface Conversation {
   updated_at: string;
 }
 
-type View = "list" | "create" | "edit" | "conversations";
+interface Recap {
+  id: string;
+  date: string;
+  messageCount: number;
+  recap: string;
+}
+
+type View = "list" | "create" | "edit" | "conversations" | "recaps";
 
 // ─── Form felter ─────────────────────────────────────────────────────────────
 
@@ -217,6 +224,70 @@ function ConversationsView({
   );
 }
 
+// ─── Recaps View ─────────────────────────────────────────────────────────────
+
+function RecapsView({
+  profile,
+  recaps,
+  loading,
+  onBack,
+}: {
+  profile: Profile;
+  recaps: Recap[];
+  loading: boolean;
+  onBack: () => void;
+}) {
+  return (
+    <div>
+      <button
+        onClick={onBack}
+        className="text-sm text-[#4A9B8F] hover:text-[#3D8578] mb-4 transition-colors"
+      >
+        ← Tilbage til profiler
+      </button>
+      <h2 className="text-2xl font-semibold text-[#3D3530] mb-2">
+        Dagbogsnotater for {profile.name}
+      </h2>
+      <p className="text-sm text-[#9C8A7A] mb-6">
+        AI-genereret resumé af samtaler — hvad der blev talt om og hvordan det gik
+      </p>
+
+      {loading ? (
+        <p className="text-center text-[#9C8A7A] py-8">Genererer resuméer…</p>
+      ) : recaps.length === 0 ? (
+        <p className="text-[#9C8A7A] text-center py-8">Ingen samtaler at opsummere endnu</p>
+      ) : (
+        <div className="space-y-4">
+          {recaps.map((r) => (
+            <div
+              key={r.id}
+              className="rounded-2xl p-6 border border-[#DDD0C0]/60"
+              style={{ background: "rgba(255,255,255,0.7)" }}
+            >
+              <div className="flex justify-between items-center mb-3">
+                <span className="text-sm font-medium text-[#7A6A5A]">
+                  📅{" "}
+                  {new Date(r.date).toLocaleDateString("da-DK", {
+                    weekday: "long",
+                    day: "numeric",
+                    month: "long",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+                <span className="text-xs text-[#B0A090]">
+                  {r.messageCount} beskeder
+                </span>
+              </div>
+              <p className="text-[#4A3F38] leading-relaxed">{r.recap}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Admin Panel ─────────────────────────────────────────────────────────────
 
 export default function AdminPage() {
@@ -227,6 +298,8 @@ export default function AdminPage() {
   const [editingProfile, setEditingProfile] = useState<Profile | null>(null);
   const [viewProfile, setViewProfile] = useState<Profile | null>(null);
   const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [recaps, setRecaps] = useState<Recap[]>([]);
+  const [recapLoading, setRecapLoading] = useState(false);
 
   const fetchProfiles = useCallback(async () => {
     setLoading(true);
@@ -302,6 +375,23 @@ export default function AdminPage() {
     } catch (e) {
       console.error("Failed to clear memory:", e);
     }
+  };
+
+  const handleViewRecaps = async (profile: Profile) => {
+    setViewProfile(profile);
+    setRecaps([]);
+    setRecapLoading(true);
+    setView("recaps");
+    try {
+      const res = await fetch(`/api/profiles/${profile.id}?recap=true`);
+      if (res.ok) {
+        const data = await res.json();
+        setRecaps(data.recaps);
+      }
+    } catch (e) {
+      console.error("Failed to fetch recaps:", e);
+    }
+    setRecapLoading(false);
   };
 
   const handleViewConversations = async (profile: Profile) => {
@@ -387,6 +477,18 @@ export default function AdminPage() {
           </div>
         )}
 
+        {view === "recaps" && viewProfile && (
+          <RecapsView
+            profile={viewProfile}
+            recaps={recaps}
+            loading={recapLoading}
+            onBack={() => {
+              setViewProfile(null);
+              setView("list");
+            }}
+          />
+        )}
+
         {view === "conversations" && viewProfile && (
           <ConversationsView
             profile={viewProfile}
@@ -450,9 +552,16 @@ export default function AdminPage() {
 
                       <div className="flex gap-2 ml-4 flex-shrink-0">
                         <button
-                          onClick={() => handleViewConversations(p)}
+                          onClick={() => handleViewRecaps(p)}
                           className="px-3 py-1.5 rounded-lg text-xs text-[#4A9B8F] border border-[#4A9B8F]/30
                             hover:bg-[#4A9B8F]/10 transition-colors"
+                        >
+                          📖 Dagbog
+                        </button>
+                        <button
+                          onClick={() => handleViewConversations(p)}
+                          className="px-3 py-1.5 rounded-lg text-xs text-[#7A6A5A] border border-[#DDD0C0]
+                            hover:bg-white/80 transition-colors"
                         >
                           Samtaler
                         </button>
