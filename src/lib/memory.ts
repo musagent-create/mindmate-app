@@ -1,30 +1,30 @@
-import type Anthropic from "@anthropic-ai/sdk";
+import { Message } from './claude';
 
 interface Session {
-  messages: Anthropic.MessageParam[];
+  messages: Message[];
   context: string;
 }
 
-// In-memory session store — erstattes af Supabase i v2
 const sessions = new Map<string, Session>();
 
-export function getSession(sessionId: string): Session {
+export function getSession(sessionId: string, userContext?: string): Session {
   if (!sessions.has(sessionId)) {
-    sessions.set(sessionId, { messages: [], context: "" });
+    sessions.set(sessionId, {
+      messages: [],
+      context: userContext || '',
+    });
   }
-  return sessions.get(sessionId)!;
+  const session = sessions.get(sessionId)!;
+  // Update context if provided
+  if (userContext) session.context = userContext;
+  return session;
 }
 
-export function addMessage(
-  sessionId: string,
-  role: "user" | "assistant",
-  content: string
-): void {
+export function addMessage(sessionId: string, message: Message): void {
   const session = getSession(sessionId);
-  session.messages.push({ role, content });
+  session.messages.push(message);
 }
 
-export function setContext(sessionId: string, context: string): void {
-  const session = getSession(sessionId);
-  session.context = context;
+export function clearSession(sessionId: string): void {
+  sessions.delete(sessionId);
 }

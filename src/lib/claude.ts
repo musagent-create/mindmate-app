@@ -1,31 +1,44 @@
-import Anthropic from "@anthropic-ai/sdk";
-
-const anthropic = new Anthropic();
+import { spawnSync } from 'child_process';
 
 export const SYSTEM_PROMPT = `Du er en varm, tålmodig AI-samtalepartner for ældre med demens.
 Du taler ALTID dansk.
 Du husker alt brugeren fortæller dig i samtalen.
-Du gentager aldrig at du er en AI medmindre du direkte spørges.
+Du udgiver dig aldrig for at være menneskelig, medmindre du direkte spørges.
 Hvis brugeren fortæller den samme historie igen, lyt med interesse som om det er første gang.
 Stil opfølgende spørgsmål der viser du husker detaljer fra tidligere i samtalen.
 Hold svar korte (2-3 sætninger) og konkrete.
-Brug aldrig komplekse ord. Vær som en god ven der har tid.`;
+Brug aldrig komplekse ord. Vær som en god ven der altid har tid.`;
 
-export async function chat(
-  messages: Anthropic.MessageParam[],
-  userContext?: string
-): Promise<string> {
+export interface Message {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export function askClaude(messages: Message[], userContext?: string): string {
   const systemPrompt = userContext
-    ? `${SYSTEM_PROMPT}\n\nKontekst om brugeren: ${userContext}`
+    ? `${SYSTEM_PROMPT}\n\nBrugerens kontekst (huskes altid):\n${userContext}`
     : SYSTEM_PROMPT;
 
-  const response = await anthropic.messages.create({
-    model: "claude-sonnet-4-20250514",
-    max_tokens: 300,
-    system: systemPrompt,
-    messages,
-  });
+  // Build conversation as text prompt for claude CLI
+  const history = messages
+    .map(m => `${m.role === 'user' ? 'Bruger' : 'Assistent'}: ${m.content}`)
+    .join('\n');
 
-  const textBlock = response.content.find((block) => block.type === "text");
-  return textBlock ? textBlock.text : "Undskyld, jeg forstod ikke helt. Kan du sige det igen?";
+  const prompt = `${systemPrompt}\n\nSamtalehistorik:\n${history}`;
+
+  const result = spawnSync(
+    '/Users/musagent/.local/bin/claude',
+    ['--print', '--model', 'claude-sonnet-4-6'],
+    {
+      input: prompt,
+      encoding: 'utf8',
+      timeout: 30000,
+      maxBuffer: 1024 * 1024,
+    }
+  );
+
+  if (result.error) throw new Error(`Claude CLI error: ${result.error.message}`);
+  if (result.status !== 0) throw new Error(`Claude CLI exited ${result.status}: ${result.stderr}`);
+
+  return (result.stdout || '').trim();
 }
