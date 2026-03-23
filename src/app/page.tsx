@@ -415,6 +415,12 @@ function ChatScreen({ profile, onReset }: { profile: UserProfile; onReset: () =>
     try { await navigator.mediaDevices.getUserMedia({ audio: true }); }
     catch { setLastReply("Mikrofon-adgang nægtet. Tillad mikrofon og prøv igen."); return; }
 
+    // Safari: "lås op" for TTS ved at tale under user gesture
+    // Uden dette blokerer Safari speak() i auto-loop
+    const unlock = new SpeechSynthesisUtterance("");
+    unlock.volume = 0;
+    speechSynthesis.speak(unlock);
+
     setConversationActive(true);
     checkedInRef.current = false;
 
