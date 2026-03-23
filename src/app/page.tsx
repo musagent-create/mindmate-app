@@ -259,6 +259,8 @@ function ChatScreen({ profile, onReset }: { profile: UserProfile; onReset: () =>
   const [dots, setDots] = useState(0);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const transcriptRef = useRef<string>("");
 
   useEffect(() => { audioRef.current = new Audio(); }, []);
 
@@ -274,7 +276,17 @@ function ChatScreen({ profile, onReset }: { profile: UserProfile; onReset: () =>
 
   const speakWithBrowserTTS = useCallback((text: string) => {
     const u = new SpeechSynthesisUtterance(text);
-    u.lang = "da-DK"; u.rate = 0.82; u.pitch = 1.05;
+    u.lang = "da-DK";
+    u.rate = 0.82;
+    u.pitch = 1.05;
+
+    // Find en dansk stemme — ellers falder den tilbage til system default (ofte engelsk)
+    const voices = speechSynthesis.getVoices();
+    const danishVoice = voices.find(v => v.lang === "da-DK")
+      || voices.find(v => v.lang.startsWith("da"))
+      || voices.find(v => v.name.toLowerCase().includes("danish"));
+    if (danishVoice) u.voice = danishVoice;
+
     u.onend = () => setState("idle");
     speechSynthesis.speak(u);
   }, []);
@@ -316,14 +328,43 @@ function ChatScreen({ profile, onReset }: { profile: UserProfile; onReset: () =>
     catch { setLastReply("Mikrofon-adgang nægtet. Tillad mikrofon og prøv igen."); return; }
 
     const r = new SR();
-    r.lang = "da-DK"; r.continuous = false; r.interimResults = false;
-    r.onresult = (e: SpeechRecognitionEvent) => {
-      const t = e.results[0][0].transcript;
-      if (t.trim()) sendMessage(t); else setState("idle");
+    r.lang = "da-DK";
+    r.continuous = true;
+    r.interimResults = true;
+    transcriptRef.current = "";
+
+    const resetSilenceTimer = () => {
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = setTimeout(() => {
+        // 3 sekunder uden tale — stop og send
+        r.stop();
+      }, 3000);
     };
-    r.onerror = () => { setLastReply("Kunne ikke høre dig. Prøv igen."); setState("idle"); };
+
+    r.onresult = (e: SpeechRecognitionEvent) => {
+      let full = "";
+      for (let i = 0; i < e.results.length; i++) {
+        full += e.results[i][0].transcript;
+      }
+      transcriptRef.current = full;
+      resetSilenceTimer();
+    };
+
+    r.onend = () => {
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      const text = transcriptRef.current.trim();
+      if (text) sendMessage(text); else setState("idle");
+    };
+
+    r.onerror = () => {
+      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+      setLastReply("Kunne ikke høre dig. Prøv igen.");
+      setState("idle");
+    };
+
     recognitionRef.current = r;
     r.start();
+    resetSilenceTimer(); // Start første silence timer
     setState("listening");
   }, [sendMessage]);
 
