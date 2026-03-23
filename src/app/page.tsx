@@ -6,10 +6,10 @@ type AppState = "idle" | "listening" | "thinking" | "speaking";
 type Screen = "select" | "setup" | "chat";
 
 const STATE_CONFIG = {
-  idle: { bg: "bg-[#4A9B8F]", ring: "ring-[#4A9B8F]/30", label: "Tryk for at tale", hint: "Klar når du er det" },
-  listening: { bg: "bg-[#E07B6A]", ring: "ring-[#E07B6A]/30", label: "Lytter…", hint: "Bare tal naturligt" },
+  idle: { bg: "bg-[#4A9B8F]", ring: "ring-[#4A9B8F]/30", label: "Tryk for at starte", hint: "Klar til en snak" },
+  listening: { bg: "bg-[#E07B6A]", ring: "ring-[#E07B6A]/30", label: "Lytter…", hint: "Tag dig god tid" },
   thinking: { bg: "bg-[#C4956A]", ring: "ring-[#C4956A]/30", label: "Tænker…", hint: "Et øjeblik" },
-  speaking: { bg: "bg-[#4A9B8F]", ring: "ring-[#4A9B8F]/30", label: "Taler…", hint: "Tryk for at afbryde" },
+  speaking: { bg: "bg-[#4A9B8F]", ring: "ring-[#4A9B8F]/30", label: "Taler…", hint: "Tryk for at stoppe" },
 };
 
 const BG = "linear-gradient(160deg, #FDF6EC 0%, #F0EBE3 100%)";
@@ -257,10 +257,12 @@ function ChatScreen({ profile, onReset }: { profile: UserProfile; onReset: () =>
   const [state, setState] = useState<AppState>("idle");
   const [lastReply, setLastReply] = useState("");
   const [dots, setDots] = useState(0);
+  const [conversationActive, setConversationActive] = useState(false);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const transcriptRef = useRef<string>("");
+  const checkedInRef = useRef(false);
 
   useEffect(() => { audioRef.current = new Audio(); }, []);
 
@@ -274,105 +276,150 @@ function ChatScreen({ profile, onReset }: { profile: UserProfile; onReset: () =>
     return () => clearInterval(t);
   }, [state]);
 
-  const speakWithBrowserTTS = useCallback((text: string) => {
+  // Find dansk stemme
+  const getDanishVoice = useCallback(() => {
+    const voices = speechSynthesis.getVoices();
+    return voices.find(v => v.lang === "da-DK")
+      || voices.find(v => v.lang.startsWith("da"))
+      || voices.find(v => v.name.toLowerCase().includes("danish"))
+      || null;
+  }, []);
+
+  // TTS der kalder onDone når færdig (bruges til auto-loop)
+  const speakText = useCallback((text: string, onDone: () => void) => {
     const u = new SpeechSynthesisUtterance(text);
     u.lang = "da-DK";
     u.rate = 0.82;
     u.pitch = 1.05;
-
-    // Find en dansk stemme — ellers falder den tilbage til system default (ofte engelsk)
-    const voices = speechSynthesis.getVoices();
-    const danishVoice = voices.find(v => v.lang === "da-DK")
-      || voices.find(v => v.lang.startsWith("da"))
-      || voices.find(v => v.name.toLowerCase().includes("danish"));
-    if (danishVoice) u.voice = danishVoice;
-
-    u.onend = () => setState("idle");
+    const dv = getDanishVoice();
+    if (dv) u.voice = dv;
+    u.onend = onDone;
     speechSynthesis.speak(u);
+  }, [getDanishVoice]);
+
+  // Start lytning — returnerer promise med transkriberet tekst (eller "" ved timeout)
+  const listenOnce = useCallback((): Promise<string> => {
+    return new Promise((resolve) => {
+      const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SR) { resolve(""); return; }
+
+      const r = new SR();
+      r.lang = "da-DK";
+      r.continuous = true;
+      r.interimResults = true;
+      transcriptRef.current = "";
+
+      const resetTimer = (ms: number) => {
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+        silenceTimerRef.current = setTimeout(() => r.stop(), ms);
+      };
+
+      r.onresult = (e: SpeechRecognitionEvent) => {
+        let full = "";
+        for (let i = 0; i < e.results.length; i++) {
+          full += e.results[i][0].transcript;
+        }
+        transcriptRef.current = full;
+        resetTimer(3000); // 3 sek efter sidste ord
+      };
+
+      r.onend = () => {
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+        resolve(transcriptRef.current.trim());
+      };
+
+      r.onerror = () => {
+        if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
+        resolve("");
+      };
+
+      recognitionRef.current = r;
+      r.start();
+      resetTimer(10000); // 10 sek initial timeout — plads til tænkepauser
+      setState("listening");
+    });
   }, []);
 
-  const playReply = useCallback(async (text: string) => {
-    setState("speaking");
-    setLastReply(text);
-    try {
-      const res = await fetch("/api/tts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
-      if (!res.ok) { speakWithBrowserTTS(text); return; }
-      const ct = res.headers.get("Content-Type");
-      if (ct?.includes("audio/mpeg")) {
-        const url = URL.createObjectURL(await res.blob());
-        const audio = audioRef.current!;
-        audio.src = url;
-        audio.onended = () => { URL.revokeObjectURL(url); setState("idle"); };
-        audio.onerror = () => { URL.revokeObjectURL(url); speakWithBrowserTTS(text); };
-        await audio.play();
-      } else { speakWithBrowserTTS(text); }
-    } catch { speakWithBrowserTTS(text); }
-  }, [speakWithBrowserTTS]);
-
-  const sendMessage = useCallback(async (text: string) => {
+  // Send besked til Claude og få svar
+  const getReply = useCallback(async (text: string): Promise<string> => {
     setState("thinking");
     try {
       const res = await fetch("/api/chat", {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: text, profileId: profile.id }),
       });
-      if (!res.ok) { setLastReply("Undskyld, der skete en fejl. Prøv igen."); setState("idle"); return; }
-      await playReply((await res.json()).reply);
-    } catch { setLastReply("Undskyld, jeg kan ikke svare lige nu."); setState("idle"); }
-  }, [profile.id, playReply]);
+      if (!res.ok) return "Undskyld, der skete en fejl.";
+      return (await res.json()).reply;
+    } catch { return "Undskyld, jeg kan ikke svare lige nu."; }
+  }, [profile.id]);
 
-  const startListening = useCallback(async () => {
-    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { setLastReply("Din browser understøtter ikke talegenkendelse. Prøv Safari eller Chrome."); return; }
+  // Tal og vent til færdig
+  const speakAndWait = useCallback((text: string): Promise<void> => {
+    return new Promise((resolve) => {
+      setState("speaking");
+      setLastReply(text);
+      speakText(text, resolve);
+    });
+  }, [speakText]);
+
+  // ─── Samtale-loop ──────────────────────────────────────────────────────────
+  const startConversation = useCallback(async () => {
     try { await navigator.mediaDevices.getUserMedia({ audio: true }); }
     catch { setLastReply("Mikrofon-adgang nægtet. Tillad mikrofon og prøv igen."); return; }
 
-    const r = new SR();
-    r.lang = "da-DK";
-    r.continuous = true;
-    r.interimResults = true;
-    transcriptRef.current = "";
+    setConversationActive(true);
+    checkedInRef.current = false;
 
-    const resetSilenceTimer = () => {
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-      silenceTimerRef.current = setTimeout(() => {
-        // 3 sekunder uden tale — stop og send
-        r.stop();
-      }, 3000);
-    };
+    // Loop: lyt → send → svar → gentag
+    const loop = async () => {
+      while (true) {
+        // Lyt til brugeren
+        const userText = await listenOnce();
 
-    r.onresult = (e: SpeechRecognitionEvent) => {
-      let full = "";
-      for (let i = 0; i < e.results.length; i++) {
-        full += e.results[i][0].transcript;
+        if (!userText) {
+          // Ingen tale — check-in eller afslut
+          if (!checkedInRef.current) {
+            checkedInRef.current = true;
+            await speakAndWait("Er du stadig der? Bare sig noget, så fortsætter vi.");
+            const retry = await listenOnce();
+            if (retry) {
+              checkedInRef.current = false;
+              const reply = await getReply(retry);
+              await speakAndWait(reply);
+              continue;
+            }
+          }
+          // Stadig stille — afslut samtalen
+          await speakAndWait("Det var hyggeligt at snakke! Tryk på knappen når du vil tale igen.");
+          setConversationActive(false);
+          setState("idle");
+          return;
+        }
+
+        // Bruger sagde noget — nulstil check-in
+        checkedInRef.current = false;
+        const reply = await getReply(userText);
+        await speakAndWait(reply);
       }
-      transcriptRef.current = full;
-      resetSilenceTimer();
     };
 
-    r.onend = () => {
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-      const text = transcriptRef.current.trim();
-      if (text) sendMessage(text); else setState("idle");
-    };
-
-    r.onerror = () => {
-      if (silenceTimerRef.current) clearTimeout(silenceTimerRef.current);
-      setLastReply("Kunne ikke høre dig. Prøv igen.");
-      setState("idle");
-    };
-
-    recognitionRef.current = r;
-    r.start();
-    resetSilenceTimer(); // Start første silence timer
-    setState("listening");
-  }, [sendMessage]);
+    loop();
+  }, [listenOnce, getReply, speakAndWait]);
 
   const handlePress = useCallback(() => {
-    if (state === "idle") startListening();
-    else if (state === "listening") recognitionRef.current?.stop();
-    else if (state === "speaking") { audioRef.current?.pause(); speechSynthesis.cancel(); setState("idle"); }
-  }, [state, startListening]);
+    if (!conversationActive && state === "idle") {
+      startConversation();
+    } else if (state === "listening") {
+      // Stop lytning tidligt — sender hvad der er sagt
+      recognitionRef.current?.stop();
+    } else if (state === "speaking") {
+      // Afbryd tale
+      audioRef.current?.pause();
+      speechSynthesis.cancel();
+      setState("idle");
+      setConversationActive(false);
+    }
+  }, [state, conversationActive, startConversation]);
 
   const cfg = STATE_CONFIG[state];
   const animLabel = (state === "thinking" || state === "listening")
