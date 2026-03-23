@@ -311,7 +311,25 @@ function ChatScreen({ profile, onReset }: { profile: UserProfile; onReset: () =>
       // og sæt rate lidt ned så det lyder mere roligt
       u.rate = 0.75;
     }
-    u.onend = onDone;
+    // Safari bug: onend fires ikke altid. Fallback med timeout.
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      onDone();
+    };
+
+    u.onend = finish;
+    u.onerror = finish;
+
+    // Estimér taletid: ~80ms per tegn ved rate 0.82 + 2s buffer
+    const estimatedMs = Math.max(3000, text.length * 80 + 2000);
+    const fallbackTimer = setTimeout(finish, estimatedMs);
+
+    u.addEventListener("end", () => clearTimeout(fallbackTimer));
+
+    // Safari kræver at speechSynthesis ikke er paused
+    speechSynthesis.cancel();
     speechSynthesis.speak(u);
   }, [getDanishVoice, voicesLoaded]);
 
