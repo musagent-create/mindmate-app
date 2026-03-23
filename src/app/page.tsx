@@ -6,8 +6,8 @@ type AppState = "idle" | "listening" | "thinking" | "speaking";
 type Screen = "setup" | "chat";
 
 const STATE_CONFIG = {
-  idle: { bg: "bg-[#4A9B8F]", ring: "ring-[#4A9B8F]/30", label: "Tryk for at tale", hint: "Jeg lytter, når du er klar" },
-  listening: { bg: "bg-[#E07B6A]", ring: "ring-[#E07B6A]/30", label: "Lytter…", hint: "Tal roligt og tydeligt" },
+  idle: { bg: "bg-[#4A9B8F]", ring: "ring-[#4A9B8F]/30", label: "Tryk for at tale", hint: "Klar når du er det" },
+  listening: { bg: "bg-[#E07B6A]", ring: "ring-[#E07B6A]/30", label: "Lytter…", hint: "Bare tal naturligt" },
   thinking: { bg: "bg-[#C4956A]", ring: "ring-[#C4956A]/30", label: "Tænker…", hint: "Et øjeblik" },
   speaking: { bg: "bg-[#4A9B8F]", ring: "ring-[#4A9B8F]/30", label: "Taler…", hint: "Tryk for at afbryde" },
 };
@@ -44,7 +44,7 @@ function SetupScreen({ onStart }: { onStart: (profile: UserProfile) => void }) {
         {/* Header */}
         <div className="text-center mb-10">
           <h1 className="text-4xl font-semibold text-[#3D3530] tracking-tight mb-2">MindMate</h1>
-          <p className="text-[#9C8A7A] text-base">Fortæl os lidt om den person, der skal bruge appen</p>
+          <p className="text-[#9C8A7A] text-base">Hvem skal vi tale med i dag?</p>
         </div>
 
         {/* Form */}
@@ -87,7 +87,7 @@ function SetupScreen({ onStart }: { onStart: (profile: UserProfile) => void }) {
         </button>
 
         <p className="text-center text-[#B0A090] text-sm mt-4">
-          Kun navn er påkrævet — resten gør samtalen rigere
+          Kun navn er påkrævet — jo mere du fortæller, jo bedre samtale
         </p>
       </div>
     </div>
@@ -241,7 +241,7 @@ function ChatScreen({ profile, onReset }: { profile: UserProfile; onReset: () =>
 
       <div className="text-center mb-14">
         <h1 className="text-5xl font-semibold text-[#3D3530] tracking-tight mb-2">Hej, {profile.name}</h1>
-        <p className="text-lg text-[#9C8A7A]">Din tålmodige samtalepartner</p>
+        <p className="text-lg text-[#9C8A7A]">Altid klar til en god snak</p>
       </div>
 
       {/* Button */}

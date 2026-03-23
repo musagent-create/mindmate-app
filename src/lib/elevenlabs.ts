@@ -1,42 +1,44 @@
-// ElevenLabs TTS — Flash v2.5 (lav latency, dansk, ~50% billigere end v2)
-// Voice: "Matilda" — varm, rolig, naturlig dansk-kompatibel stemme
-// Alternativ: "Charlotte" (mere formel), "Lily" (lysere)
+import { ElevenLabsClient } from "elevenlabs";
 
-const VOICE_ID = "XrExE9yKIg1WjnnlVkGX"; // Matilda — varm og rolig
-const MODEL_ID = "eleven_flash_v2_5";      // Flash v2.5 — 75ms latency, 0.5 credits/char
+// Matilda — varm, rolig, naturlig (multilingual v2 kompatibel)
+const VOICE_ID = "XrExE9yKIg1WjnnlVkGX";
 
-export async function textToSpeech(text: string): Promise<ArrayBuffer | null> {
+// Flash v2.5 — 75ms latency, 50% billigere end standard, fuld dansk support
+const MODEL_ID = "eleven_flash_v2_5";
+
+let client: ElevenLabsClient | null = null;
+
+function getClient(): ElevenLabsClient | null {
   const apiKey = process.env.ELEVENLABS_API_KEY;
-  if (!apiKey || apiKey === "your-elevenlabs-api-key-here") {
-    return null; // Fallback til browser TTS
-  }
+  if (!apiKey || apiKey === "your-elevenlabs-api-key-here") return null;
+  if (!client) client = new ElevenLabsClient({ apiKey });
+  return client;
+}
+
+export async function textToSpeech(text: string): Promise<Buffer | null> {
+  const el = getClient();
+  if (!el) return null; // Ingen key → browser TTS fallback
 
   try {
-    const response = await fetch(
-      `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}`,
-      {
-        method: "POST",
-        headers: {
-          "xi-api-key": apiKey,
-          "Content-Type": "application/json",
-          "Accept": "audio/mpeg",
-        },
-        body: JSON.stringify({
-          text,
-          model_id: MODEL_ID,
-          voice_settings: {
-            stability: 0.65,        // Lidt variation = mere naturlig
-            similarity_boost: 0.85, // Tæt på original stemme
-            style: 0.2,             // Subtil udtryksevne
-            use_speaker_boost: true,
-          },
-        }),
-      }
-    );
+    const audioStream = await el.textToSpeech.convert(VOICE_ID, {
+      text,
+      model_id: MODEL_ID,
+      voice_settings: {
+        stability: 0.65,
+        similarity_boost: 0.85,
+        style: 0.2,
+        use_speaker_boost: true,
+      },
+    });
 
-    if (!response.ok) return null;
-    return response.arrayBuffer();
-  } catch {
+    // Collect stream into buffer
+    const chunks: Buffer[] = [];
+    for await (const chunk of audioStream) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    }
+    return Buffer.concat(chunks);
+  } catch (err) {
+    console.error("ElevenLabs error:", err);
     return null;
   }
 }

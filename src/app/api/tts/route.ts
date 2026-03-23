@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ fallback: true });
   }
 
-  return new NextResponse(audioBuffer, {
+  return new NextResponse(audioBuffer as unknown as BodyInit, {
     headers: {
       "Content-Type": "audio/mpeg",
     },
