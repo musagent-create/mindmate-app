@@ -291,6 +291,19 @@ export default function AdminPage() {
     }
   };
 
+  const handleClearMemory = async (profile: Profile) => {
+    if (!confirm(`Slet alle samtaler for ${profile.name}? Profilen beholdes.`)) return;
+    try {
+      const res = await fetch(`/api/profiles/${profile.id}?clear=conversations`, { method: "DELETE" });
+      if (res.ok) {
+        const data = await res.json();
+        alert(`${data.cleared} samtale(r) slettet for ${profile.name}`);
+      }
+    } catch (e) {
+      console.error("Failed to clear memory:", e);
+    }
+  };
+
   const handleViewConversations = async (profile: Profile) => {
     try {
       const res = await fetch(`/api/profiles/${profile.id}`);
@@ -442,6 +455,13 @@ export default function AdminPage() {
                             hover:bg-[#4A9B8F]/10 transition-colors"
                         >
                           Samtaler
+                        </button>
+                        <button
+                          onClick={() => handleClearMemory(p)}
+                          className="px-3 py-1.5 rounded-lg text-xs text-[#C4956A] border border-[#C4956A]/30
+                            hover:bg-[#C4956A]/10 transition-colors"
+                        >
+                          Nulstil hukommelse
                         </button>
                         <button
                           onClick={() => {

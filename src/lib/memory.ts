@@ -147,6 +147,23 @@ export async function getConversationsByProfile(profileId: string): Promise<Conv
   return data || [];
 }
 
+export async function clearConversationsByProfile(profileId: string): Promise<number> {
+  const { data, error: countError } = await supabaseAdmin
+    .from('conversations')
+    .select('id')
+    .eq('profile_id', profileId);
+
+  const count = data?.length || 0;
+
+  const { error } = await supabaseAdmin
+    .from('conversations')
+    .delete()
+    .eq('profile_id', profileId);
+
+  if (error) throw new Error(`Failed to clear conversations: ${error.message}`);
+  return count;
+}
+
 // ─── Legacy helpers (bruges af chat route) ───────────────────────────────────
 
 export function buildUserContext(profile: Profile): string {

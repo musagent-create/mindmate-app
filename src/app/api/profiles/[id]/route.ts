@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getProfile, updateProfile, deleteProfile, getConversationsByProfile } from '@/lib/memory';
+import { getProfile, updateProfile, deleteProfile, getConversationsByProfile, clearConversationsByProfile } from '@/lib/memory';
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -36,9 +36,18 @@ export async function PUT(req: NextRequest, { params }: { params: Promise<{ id: 
   }
 }
 
-export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
+export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
+    const { searchParams } = new URL(req.url);
+
+    // ?clear=conversations — slet kun samtaler, behold profil
+    if (searchParams.get('clear') === 'conversations') {
+      const count = await clearConversationsByProfile(id);
+      return NextResponse.json({ success: true, cleared: count });
+    }
+
+    // Default: slet hele profilen (+ samtaler via CASCADE)
     await deleteProfile(id);
     return NextResponse.json({ success: true });
   } catch (err: unknown) {
