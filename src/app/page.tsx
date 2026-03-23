@@ -297,39 +297,54 @@ function ChatScreen({ profile, onReset }: { profile: UserProfile; onReset: () =>
     return () => { speechSynthesis.onvoiceschanged = null; };
   }, []);
 
+  // AudioContext unlock — genaktiverer iOS audio session efter STT
+  const unlockAudio = useCallback(async () => {
+    try {
+      const AC = window.AudioContext || (window as unknown as Record<string, typeof AudioContext>).webkitAudioContext;
+      const ctx = new AC();
+      await ctx.resume();
+      const osc = ctx.createOscillator();
+      osc.frequency.value = 0;
+      osc.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.01);
+      await new Promise(r => setTimeout(r, 100));
+      ctx.close();
+    } catch { /* ignore on desktop */ }
+  }, []);
+
   // TTS der kalder onDone når færdig (bruges til auto-loop)
   const speakText = useCallback((text: string, onDone: () => void) => {
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = "da-DK";
-    u.rate = 0.82;
-    u.pitch = 1.05;
-    const dv = getDanishVoice();
-    if (dv) {
-      u.voice = dv;
-    } else {
-      // Ingen dansk stemme — brug en blødere engelsk stemme
-      // og sæt rate lidt ned så det lyder mere roligt
-      u.rate = 0.75;
-    }
-    // Safari bug: onend fires ikke altid. Fallback med timeout.
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      onDone();
-    };
+    // Re-unlock audio session (Safari mister den efter STT)
+    unlockAudio().then(() => {
+      const u = new SpeechSynthesisUtterance(text);
+      u.lang = "da-DK";
+      u.rate = 0.82;
+      u.pitch = 1.05;
+      const dv = getDanishVoice();
+      if (dv) {
+        u.voice = dv;
+      } else {
+        u.rate = 0.75;
+      }
+      // Safari bug: onend fires ikke altid. Fallback med timeout.
+      let done = false;
+      const finish = () => {
+        if (done) return;
+        done = true;
+        onDone();
+      };
 
-    u.onend = finish;
-    u.onerror = finish;
+      u.onend = finish;
+      u.onerror = finish;
 
-    // Estimér taletid: ~80ms per tegn ved rate 0.82 + 2s buffer
-    const estimatedMs = Math.max(3000, text.length * 80 + 2000);
-    const fallbackTimer = setTimeout(finish, estimatedMs);
+      const estimatedMs = Math.max(3000, text.length * 80 + 2000);
+      const fallbackTimer = setTimeout(finish, estimatedMs);
+      u.addEventListener("end", () => clearTimeout(fallbackTimer));
 
-    u.addEventListener("end", () => clearTimeout(fallbackTimer));
-
-    speechSynthesis.speak(u);
-  }, [getDanishVoice, voicesLoaded]);
+      speechSynthesis.speak(u);
+    });
+  }, [getDanishVoice, voicesLoaded, unlockAudio]);
 
   // Start lytning — returnerer promise med transkriberet tekst (eller "" ved timeout)
   const listenOnce = useCallback((): Promise<string> => {
