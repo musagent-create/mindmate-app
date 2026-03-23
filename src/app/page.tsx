@@ -285,6 +285,18 @@ function ChatScreen({ profile, onReset }: { profile: UserProfile; onReset: () =>
       || null;
   }, []);
 
+  // Preload stemmer (nogle browsere loader dem async)
+  const [voicesLoaded, setVoicesLoaded] = useState(false);
+  useEffect(() => {
+    const loadVoices = () => {
+      const v = speechSynthesis.getVoices();
+      if (v.length > 0) setVoicesLoaded(true);
+    };
+    loadVoices();
+    speechSynthesis.onvoiceschanged = loadVoices;
+    return () => { speechSynthesis.onvoiceschanged = null; };
+  }, []);
+
   // TTS der kalder onDone når færdig (bruges til auto-loop)
   const speakText = useCallback((text: string, onDone: () => void) => {
     const u = new SpeechSynthesisUtterance(text);
@@ -292,10 +304,16 @@ function ChatScreen({ profile, onReset }: { profile: UserProfile; onReset: () =>
     u.rate = 0.82;
     u.pitch = 1.05;
     const dv = getDanishVoice();
-    if (dv) u.voice = dv;
+    if (dv) {
+      u.voice = dv;
+    } else {
+      // Ingen dansk stemme — brug en blødere engelsk stemme
+      // og sæt rate lidt ned så det lyder mere roligt
+      u.rate = 0.75;
+    }
     u.onend = onDone;
     speechSynthesis.speak(u);
-  }, [getDanishVoice]);
+  }, [getDanishVoice, voicesLoaded]);
 
   // Start lytning — returnerer promise med transkriberet tekst (eller "" ved timeout)
   const listenOnce = useCallback((): Promise<string> => {
@@ -362,6 +380,18 @@ function ChatScreen({ profile, onReset }: { profile: UserProfile; onReset: () =>
     });
   }, [speakText]);
 
+  // Detect om brugeren vil stoppe samtalen
+  const wantsToStop = useCallback((text: string) => {
+    const lower = text.toLowerCase().trim();
+    const stopPhrases = [
+      "farvel", "hej hej", "vi ses", "tak for i dag", "jeg vil ikke snakke mere",
+      "stop", "slut", "det var det", "det er nok", "god nat", "adjø",
+      "nej tak", "ikke mere", "vi stopper", "lad os stoppe", "jeg er færdig",
+      "tak for snakken", "det var hyggeligt",
+    ];
+    return stopPhrases.some(p => lower.includes(p));
+  }, []);
+
   // ─── Samtale-loop ──────────────────────────────────────────────────────────
   const startConversation = useCallback(async () => {
     try { await navigator.mediaDevices.getUserMedia({ audio: true }); }
@@ -396,7 +426,17 @@ function ChatScreen({ profile, onReset }: { profile: UserProfile; onReset: () =>
           return;
         }
 
-        // Bruger sagde noget — nulstil check-in
+        // Bruger sagde noget — tjek om de vil stoppe
+        if (wantsToStop(userText)) {
+          // Send til Claude så den kan sige pænt farvel
+          const reply = await getReply(userText);
+          await speakAndWait(reply);
+          setConversationActive(false);
+          setState("idle");
+          return;
+        }
+
+        // Fortsæt samtalen
         checkedInRef.current = false;
         const reply = await getReply(userText);
         await speakAndWait(reply);
@@ -404,7 +444,7 @@ function ChatScreen({ profile, onReset }: { profile: UserProfile; onReset: () =>
     };
 
     loop();
-  }, [listenOnce, getReply, speakAndWait]);
+  }, [listenOnce, getReply, speakAndWait, wantsToStop]);
 
   const handlePress = useCallback(() => {
     if (!conversationActive && state === "idle") {
